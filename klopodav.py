@@ -16,9 +16,9 @@ class MuZeroConfig:
 
         ### Game
         self.observation_shape = (3, 10, 10)  # Dimensions of the game observation, must be 3D (channel, height, width). For a 1D array, please reshape it to (1, 1, length of array)
-        self.action_space = [i for i in range(200)]  # Fixed list of all possible actions. You should only edit the length
+        self.action_space = [i for i in range(201)]  # Fixed list of all possible actions. You should only edit the length
         self.players = [i for i in range(2)]  # List of players. You should only edit the length
-        self.stacked_observations = 1  # Number of previous observations and previous actions to add to the current observation
+        self.stacked_observations = 0  # Number of previous observations and previous actions to add to the current observation
 
         # Evaluate
         self.muzero_player = 0  # Turn Muzero begins to play (0: MuZero plays first, 1: MuZero plays second)
@@ -29,9 +29,9 @@ class MuZeroConfig:
         ### Self-Play
         self.num_actors = 4  # Number of simultaneous threads self-playing to feed the replay buffer
         self.max_moves = 250  # Maximum number of moves if game is not finished before
-        self.num_simulations = 50  # Number of future moves self-simulated
+        self.num_simulations = 30  # Number of future moves self-simulated
         self.discount = 1  # Chronological discount of the reward
-        self.temperature_threshold = 40  # Number of moves before dropping temperature to 0 (ie playing according to the max)
+        self.temperature_threshold = None  # Number of moves before dropping temperature to 0 (ie playing according to the max)
 
         # Root prior exploration noise
         self.root_dirichlet_alpha = 0.25
@@ -66,7 +66,7 @@ class MuZeroConfig:
         self.results_path = os.path.join(os.path.dirname(__file__), "../results", os.path.basename(__file__)[:-3],
                                          datetime.datetime.now().strftime(
                                              "%Y-%m-%d--%H-%M-%S"))  # Path to store the model weights and TensorBoard logs
-        self.training_steps = 100  # Total number of training steps (ie weights update according to a batch)
+        self.training_steps = 100000  # Total number of training steps (ie weights update according to a batch)
         self.batch_size = 128  # Number of parts of games to train on at each training step
         self.checkpoint_interval = 10  # Number of training steps before using the model for sef-playing
         self.value_loss_weight = 1  # Scale the value loss to avoid overfitting of the value function, paper recommends 0.25 (See paper appendix Reanalyze)
@@ -216,9 +216,11 @@ class Klop:
         self.reward = 0
         self.moves = {}
         self.backmoves = {}
-        for i, j in enumerate([str(m)+str(s)+str(l) for l in range(10) for s in range(10) for m in range(2)]):
+
+        for i, j in enumerate([str(m)+str(s)+str(l) for l in range(self.sze) for s in range(self.sze) for m in range(2)]):
             self.moves[i] = j
             self.backmoves[j] = i
+        self.moves[i+1] = 'f'
 
     def common_data(self, l):
         out = []
@@ -249,8 +251,22 @@ class Klop:
         return dot
 
     def step(self, action):
+        done = False
         action = self.moves[int(action)]
-        #print(action + ' | ')
+        if action == 'f':
+            if self.player == 0 and len(self.p2con) != 0:
+                self.player = 1
+                self.reward = len(self.p2con) + 1
+            else:
+                self.player = 0
+                self.reward = len(self.p1con) + 1
+
+            done = True
+            print()
+            print(str(self.player) + ' | WON')
+            self.render()
+
+            return self.get_observation(), self.reward, done
 
         x = int(action[1])
         y = int(action[2])
@@ -275,10 +291,9 @@ class Klop:
                     self.p1cluster = list(self.common_data(self.p1cluster))
                 self.p2con.remove([x, y])
             self.board[x][y] = state
-
-            #if self.playerTurn == 3:
-            self.player = 1
-            #self.playerTurn += 1
+            if self.playerTurn == 3:
+                self.player = 1
+            self.playerTurn += 1
 
         elif self.player == 1:
             if state == 1:
@@ -297,24 +312,11 @@ class Klop:
                 self.p1con.remove([x, y])
             self.board[x][y] = -1 * state
 
-            #if self.playerTurn == 6:
-            self.player = 0
-            #else:
-            #    self.playerTurn += 1
-
-        self.render()
-
-        done = False
-        if self.legal_actions() == []:
-            if self.player == 1:
+            if self.playerTurn == 6:
+                self.playerTurn = 1
                 self.player = 0
             else:
-                self.player = 1
-            self.reward = 1
-            done = True
-            print()
-            print(str(self.player) + ' | WON')
-            self.render()
+                self.playerTurn += 1
 
         return self.get_observation(), self.reward, done
 
@@ -330,8 +332,6 @@ class Klop:
 
 
     def legal_actions(self):
-        #print([self.player])
-        #self.render()
         if self.player == 0:
             state = 1
             opstate = -1
@@ -344,6 +344,7 @@ class Klop:
             kstate = -2
             player = self.p2con
             cluster = self.p2cluster
+
         checked = []
         valid_pos = []
         start_pos = [self.sze - 1, 0][::state]
@@ -370,14 +371,14 @@ class Klop:
                                         valid_pos.append(str(kstate * state - 1) + str(j[0]) + str(j[1]))
                             checked.append(c)
         if not valid_pos:
-            self.reward = 1
-            return []
+            return [len(self.moves)-1]
+
         return [self.backmoves[i] for n, i in enumerate(valid_pos) if i not in valid_pos[:n]]
 
     def get_observation(self):
         board_player1 = numpy.array([[float(abs(i)) if (i == 1 or i == 2) else 0.0 for i in j] for j in self.board])
         board_player2 = numpy.array([[float(abs(i)) if (i == -1 or i == -2) else 0.0 for i in j] for j in self.board])
-        board_to_play = numpy.full((10, 10), self.player).astype(int)
+        board_to_play = numpy.full((self.sze, self.sze), self.player).astype(int)
         return numpy.array([board_player1, board_player2, board_to_play])
 
     def reset(self):
