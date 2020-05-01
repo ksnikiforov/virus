@@ -218,6 +218,7 @@ class Klop:
         self.player = 0
         self.playerTurn = 1
         self.reward = 0
+        self.moveCount = 0
         self.moves = {}
         self.backmoves = {}
 
@@ -260,11 +261,10 @@ class Klop:
         if action == 'f':
             if self.player == 0 and len(self.p2con) != 0:
                 self.player = 1
-                self.reward = len(self.p2con) + 1
             else:
                 self.player = 0
-                self.reward = len(self.p1con) + 1
 
+            self.reward = ((self.sze**2)/self.moveCount)**2
             done = True
             print()
             print(str(self.player) + ' | WON')
@@ -321,7 +321,7 @@ class Klop:
                 self.player = 0
             else:
                 self.playerTurn += 1
-
+        self.moveCount += 1
         return self.get_observation(), self.reward, done
 
     def to_play(self):
@@ -407,6 +407,7 @@ class Klop:
         self.positions = ''
         self.player = 0
         self.playerTurn = 1
+        self.moveCount = 0
         return self.get_observation()
 
 
