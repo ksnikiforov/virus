@@ -99,14 +99,18 @@ class MuZeroConfig:
         self.ratio = None  # Desired self played games per training step ratio. Equivalent to a synchronous version, training can take much longer. Set it to None to disable it
 
     def visit_softmax_temperature_fn(self, trained_steps):
-            """
-            Parameter to alter the visit count distribution to ensure that the action selection becomes greedier as training progresses.
-            The smaller it is, the more likely the best action (ie with the highest visit count) is chosen.
-
-            Returns:
-                Positive float.
-            """
-            return 1
+        """
+        Parameter to alter the visit count distribution to ensure that the action selection becomes greedier as training progresses.
+        The smaller it is, the more likely the best action (ie with the highest visit count) is chosen.
+        Returns:
+            Positive float.
+        """
+        if trained_steps < 0.5 * self.training_steps:
+            return 1.0
+        elif trained_steps < 0.75 * self.training_steps:
+            return 0.5
+        else:
+            return 0.25
 
 
 class Game(AbstractGame):
@@ -268,8 +272,8 @@ class Klop:
 
             return self.get_observation(), self.reward, done
 
-        x = int(action[1])
-        y = int(action[2])
+        x = int(action[1]) if self.player == 0 else self.sze - 1 - int(action[1])
+        y = int(action[2]) if self.player == 0 else self.sze - 1 - int(action[2])
         state = int(action[0]) + 1
 
         self.state = state
@@ -349,7 +353,10 @@ class Klop:
         valid_pos = []
         start_pos = [self.sze - 1, 0][::state]
         if (not player) and (self.board[start_pos[0]][start_pos[1]] == 0):
-            return [self.backmoves[str(0)+str(start_pos[0])+str(start_pos[1])]]
+            if self.player == 0:
+                return [self.backmoves[str(0) + str(start_pos[0]) + str(start_pos[1])]]
+            else:
+                return [self.backmoves[str(0) + str(self.sze - 1 - start_pos[0]) + str(self.sze - 1 - start_pos[1])]]
 
         for p in player:
             x = p[0]
@@ -372,12 +379,15 @@ class Klop:
                             checked.append(c)
         if not valid_pos:
             return [len(self.moves)-1]
-
-        return [self.backmoves[i] for n, i in enumerate(valid_pos) if i not in valid_pos[:n]]
+        if self.player == 0:
+            return [self.backmoves[i] for n, i in enumerate(valid_pos) if i not in valid_pos[:n]]
+        else:
+            return [self.backmoves[i[0]+str(self.sze - int(i[1]) - 1)+str(self.sze - int(i[2]) - 1)]
+                    for n, i in enumerate(valid_pos) if i not in valid_pos[:n]]
 
     def get_observation(self):
         board_player1 = numpy.array([[float(abs(i)) if (i == 1 or i == 2) else 0.0 for i in j] for j in self.board])
-        board_player2 = numpy.array([[float(abs(i)) if (i == -1 or i == -2) else 0.0 for i in j] for j in self.board])
+        board_player2 = numpy.array([[float(abs(i)) if (i == -1 or i == -2) else 0.0 for i in j[::-1]] for j in self.board[::-1]])
         board_to_play = numpy.full((self.sze, self.sze), self.player).astype(int)
         return numpy.array([board_player1, board_player2, board_to_play])
 
@@ -428,7 +438,4 @@ class Klop:
             String representing the action.
         """
         return str(action_number)
-
-# state: 0 - nothing, 1 - 1st player dot, 2 - 1st player removed, 
-#                        3 - 2nd player dot, 4 - 2nd player removed
 
