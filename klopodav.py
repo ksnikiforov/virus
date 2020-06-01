@@ -16,7 +16,7 @@ class MuZeroConfig:
 
         ### Game
         self.observation_shape = (3, 10, 10)  # Dimensions of the game observation, must be 3D (channel, height, width). For a 1D array, please reshape it to (1, 1, length of array)
-        self.action_space = [i for i in range(201)]  # Fixed list of all possible actions. You should only edit the length
+        self.action_space = [i for i in range(101)]  # Fixed list of all possible actions. You should only edit the length
         self.players = [i for i in range(2)]  # List of players. You should only edit the length
         self.stacked_observations = 0  # Number of previous observations and previous actions to add to the current observation
 
@@ -25,9 +25,9 @@ class MuZeroConfig:
         self.opponent = "random"  # Hard coded agent that MuZero faces to assess his progress in multiplayer games. It doesn't influence training. None, "random" or "expert" if implemented in the Game class
 
         ### Self-Play
-        self.num_actors = 2  # Number of simultaneous threads self-playing to feed the replay buffer
-        self.max_moves = 200  # Maximum number of moves if game is not finished before
-        self.num_simulations = 400  # Number of future moves self-simulated
+        self.num_actors = 1  # Number of simultaneous threads self-playing to feed the replay buffer
+        self.max_moves = 121  # Maximum number of moves if game is not finished before
+        self.num_simulations = 10  # Number of future moves self-simulated
         self.discount = 1  # Chronological discount of the reward
         self.temperature_threshold = 40  # Number of moves before dropping temperature to 0 (ie playing according to the max)
 
@@ -47,9 +47,7 @@ class MuZeroConfig:
         self.downsample = False  # Downsample observations before representation network (See paper appendix Network Architecture)
         self.blocks = 6  # Number of blocks in the ResNet
         self.channels = 128  # Number of channels in the ResNet
-        self.reduced_channels_reward = 2  # Number of channels in reward head
-        self.reduced_channels_value = 2  # Number of channels in value head
-        self.reduced_channels_policy = 4  # Number of channels in policy head
+        self.reduced_channels = 4  # Number of channels before heads of dynamic and prediction networks
         self.resnet_fc_reward_layers = [64]  # Define the hidden layers in the reward head of the dynamic network
         self.resnet_fc_value_layers = [64]  # Define the hidden layers in the value head of the prediction network
         self.resnet_fc_policy_layers = [64]  # Define the hidden layers in the policy head of the prediction network
@@ -66,8 +64,8 @@ class MuZeroConfig:
         self.results_path = os.path.join(os.path.dirname(__file__), "../results", os.path.basename(__file__)[:-3],
                                          datetime.datetime.now().strftime(
                                              "%Y-%m-%d--%H-%M-%S"))  # Path to store the model weights and TensorBoard logs
-        self.training_steps = 10000  # Total number of training steps (ie weights update according to a batch)
-        self.batch_size = 512  # Number of parts of games to train on at each training step
+        self.training_steps = 1000  # Total number of training steps (ie weights update according to a batch)
+        self.batch_size = 51  # Number of parts of games to train on at each training step
         self.checkpoint_interval = 50  # Number of training steps before using the model for self-playing
         self.value_loss_weight = 1  # Scale the value loss to avoid overfitting of the value function, paper recommends 0.25 (See paper appendix Reanalyze)
         self.training_device = "cuda" if torch.cuda.is_available() else "cpu"  # Train on GPU if available
@@ -83,13 +81,13 @@ class MuZeroConfig:
 
         ### Replay Buffer
         self.window_size = 10000  # Number of self-play games to keep in the replay buffer
-        self.num_unroll_steps = 200  # Number of game moves to keep for every batch element
-        self.td_steps = 200  # Number of steps in the future to take into account for calculating the target value
+        self.num_unroll_steps = 201  # Number of game moves to keep for every batch element
+        self.td_steps = 201  # Number of steps in the future to take into account for calculating the target value
         self.use_last_model_value = False  # Use the last model to provide a fresher, stable n-step value (See paper appendix Reanalyze)
 
         # Prioritized Replay (See paper appendix Training)
         self.PER = True  # Select in priority the elements in the replay buffer which are unexpected for the network
-        self.use_max_priority = False  # If False, use the n-step TD error as initial priority. Better for large replay buffer
+        self.use_max_priority = True  # Use the n-step TD error as initial priority. Better for large replay buffer
         self.PER_alpha = 0.5  # How much prioritization is used, 0 corresponding to the uniform case, paper suggests 1
         self.PER_beta = 1.0
 
@@ -219,15 +217,6 @@ class Klop:
         self.playerTurn = 1
         self.reward = 0
         self.moveCount = 0
-        self.moves = {}
-        self.backmoves = {}
-
-        # Словарь который меняет номер хода на координаты и обратно.
-        for i, j in enumerate([str(m)+str(s)+str(l) for l in range(self.sze) for s in range(self.sze) for m in range(2)]):
-            self.moves[i] = j
-            self.backmoves[j] = i
-        self.moves[i+1] = 'f'
-        # f - сдаться
 
     # Перебирает данные данные из массивов, соединяет массивы в один если данные пересекаются.
     def common_data(self, l):
@@ -237,6 +226,7 @@ class Klop:
             lf = -1
             while len(first) > lf:
                 lf = len(first)
+
                 rest2 = []
                 for r in rest:
                     if any(i in first for i in r):
@@ -261,12 +251,12 @@ class Klop:
     # Функция, котрая обрабатывает ходы
     def step(self, action):
         done = False
-        action = self.moves[int(action)]
-        if action == 'f':  # В случае поражения одной из сторон
+        if action == 'f': # В случае поражения одной из сторон
             if self.player == 0 and len(self.p2con) != 0:
                 self.player = 1
             else:
                 self.player = 0
+
             self.reward = ((self.sze**2)/self.moveCount)**2
             done = True
             print()
@@ -275,18 +265,20 @@ class Klop:
 
             return self.get_observation(), self.reward, done
 
-        # Переворачиваю координаты в зависимотси вот игрока. (что бы бот всегда играл как бы с одной стороны)
-        x = int(action[1]) if self.player == 0 else self.sze - 1 - int(action[1])
-        y = int(action[2]) if self.player == 0 else self.sze - 1 - int(action[2])
-        state = int(action[0]) + 1
+        action = str(action).zfill(2)
 
+        # Переворачиваю координаты в зависимотси вот игрока. (что бы бот всегда играл как бы с одной стороны)
+        x = int(action[0]) if self.player == 0 else self.sze - 1 - int(action[0])
+        y = int(action[1]) if self.player == 0 else self.sze - 1 - int(action[1])
+        state = 1 if self.board[x][y] == 0 else 2
+        print(state, x, y)
         self.state = state
         tmp = 0
 
         if self.player == 0:
             if state == 1:  # state 1 - Поставить новую клетку
                 self.p1con.append([x, y])
-            elif state == 2: # state 2 - Убрать чужую клетку
+            elif state == 2:  # state 2 - Убрать чужую клетку
                 for i, m in enumerate(self.p1cluster):
                     for n in self.get_dots(x, y):
                         if n in m:  # находим в каком кластере клетка и добавляем туда.
@@ -298,7 +290,7 @@ class Klop:
                 elif tmp > 1:  # Если клетка в нескольких кластерах - объединяем их
                     self.p1cluster = list(self.common_data(self.p1cluster))
                 self.p2con.remove([x, y])
-            self.board[x][y] = state  # делаем ход
+            self.board[x][y] = state
 
             # Это нужно тк каждый игрок делает по 3 хода
             if self.playerTurn == 3:
@@ -320,18 +312,18 @@ class Klop:
                 elif tmp > 1:
                     self.p2cluster = list(self.common_data(self.p2cluster))
                 self.p1con.remove([x, y])
-            # для уменьшения числа возможных ходов, у каждого игока по 2 позиции,
+
+            # для уменьшения числа возможных ходов, у каждый игрок вводит просто коодинату без состояния,
             # но для другого игрока используются отрисцательные значения.
             self.board[x][y] = -1 * state
 
-            # Это нужно тк каждый игрок делает по 3 хода
             if self.playerTurn == 6:
                 self.playerTurn = 1
                 self.player = 0
             else:
                 self.playerTurn += 1
         self.moveCount += 1
-
+        self.render()
         return self.get_observation(), self.reward, done
 
     def to_play(self):
@@ -350,58 +342,56 @@ class Klop:
             state = 1
             opstate = -1
             kstate = 2
-            positions = self.p1con
+            player = self.p1con
             cluster = self.p1cluster
         else:
             state = -1
             opstate = 1
             kstate = -2
-            positions = self.p2con
+            player = self.p2con
             cluster = self.p2cluster
 
         checked = []
         valid_pos = []
         start_pos = [self.sze - 1, 0][::state]
         # если игрок еще не сделал не одного хода - возвращаем стартовую
-        if (not positions) and (self.board[start_pos[0]][start_pos[1]] == 0):
+        if (not player) and (self.board[start_pos[0]][start_pos[1]] == 0):
             if self.player == 0:
-                return [self.backmoves[str(0) + str(start_pos[0]) + str(start_pos[1])]]
+                return [int(str(start_pos[0]) + str(start_pos[1]))]
             else:
-                return [self.backmoves[str(0) + str(self.sze - 1 - start_pos[0]) + str(self.sze - 1 - start_pos[1])]]
+                return [int(str(self.sze - 1 - start_pos[0]) + str(self.sze - 1 - start_pos[1]))]
 
         # Находим валидные ходы
-        for p in positions:
+        for p in player:
             x = p[0]
             y = p[1]
             for m in self.get_dots(x, y):
                 d = self.board[m[0]][m[1]]
-                if d == 0:
-                    valid_pos.append(str(state * state - 1) + str(m[0]) + str(m[1]))
-                elif d == opstate:
-                    valid_pos.append(str(kstate * state - 1) + str(m[0]) + str(m[1]))
+                if d == 0 or d == opstate:
+                    valid_pos.append(int(str(m[0]) + str(m[1])))
                 elif d == kstate:
                     for c in cluster:
-                        if (c not in checked) and (m in c):  # Если позиция рядом с кластером, то чекаем кластер
+                        if (c not in checked) and (m in c):
                             for dot in c:
                                 for j in self.get_dots(int(dot[0]), int(dot[1])):
-                                    if self.board[j[0]][j[1]] == 0:
-                                        valid_pos.append(str(state * state - 1) + str(j[0]) + str(j[1]))
-                                    elif self.board[int(j[0])][int(j[1])] == opstate:
-                                        valid_pos.append(str(kstate * state - 1) + str(j[0]) + str(j[1]))
+                                    valid_pos.append(int(str(j[0]) + str(j[1])))
                             checked.append(c)  # Для того что бы не проверять один кластер несколько раз
-
         if not valid_pos:
             return [len(self.moves)-1]  # Возвращаем ход "Сдаться" если нет доступных ходов
+        else:
+            valid_pos = list(set(valid_pos))
 
         if self.player == 0:
-            return [self.backmoves[i] for n, i in enumerate(valid_pos) if i not in valid_pos[:n]]
+            return valid_pos
         else:
-            return [self.backmoves[i[0]+str(self.sze - int(i[1]) - 1)+str(self.sze - int(i[2]) - 1)]
-                    for n, i in enumerate(valid_pos) if i not in valid_pos[:n]]  # Переворачиваем ходы для 2го игрока
+            print(valid_pos)
+            return [int(str(self.sze - int(str(i).zfill(2)[0]) - 1) +
+                    str(self.sze - int(str(i).zfill(2)[1]) - 1))
+                    for i in valid_pos]  # Переворачиваем ходы для 2го игрока
 
     def get_observation(self):
         board_player1 = numpy.array([[float(abs(i)) if (i == 1 or i == 2) else 0.0 for i in j] for j in self.board])
-        board_player2 = numpy.array([[float(abs(i)) if (i == -1 or i == -2) else 0.0 for i in j[::-1]] for j in self.board[::-1]])
+        board_player2 = numpy.array([[float(abs(i)) if (i == 1 or i == -2) else 0.0 for i in j[::-1]] for j in self.board[::-1]])
         board_to_play = numpy.full((self.sze, self.sze), self.player).astype(int)
         # Возвращаем стол для 1го игрока и обратный стол для 2го
         return numpy.array([board_player1, board_player2, board_to_play])
@@ -434,6 +424,7 @@ class Klop:
             a = a.replace('1', 'x')
             a = a.replace('2', '●')
             a = a.replace('0', '.')
+
             print(m, a)
         print()
 
@@ -444,7 +435,7 @@ class Klop:
 
     def action_to_string(self, action_number):
         """
-        Convert an action number to a string representing the action.
+       Convert an action number to a string representing the action.
 
         Args:
             action_number: an integer from the action space.
